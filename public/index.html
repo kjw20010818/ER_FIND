@@ -6,29 +6,96 @@
     <script>
         let refreshTimer = null;
         let previousRanks = {};
-        let currentPage = 1;
         let allPlayers = [];
+        let currentPage = 1;
 
-        // 🔹 데이터 불러오기
+        // 🔹 디비전 계산 + 아이콘 매칭 (한글 티어명)
+        function getDivisionByMMR(mmr, rank) {
+            const divisions = [
+                { tier: "아이언 IV", min: 0, max: 149, icon: "1.png" },
+                { tier: "아이언 III", min: 150, max: 299, icon: "1.png" },
+                { tier: "아이언 II", min: 300, max: 449, icon: "1.png" },
+                { tier: "아이언 I", min: 450, max: 599, icon: "1.png" },
+
+                { tier: "브론즈 IV", min: 600, max: 799, icon: "2.png" },
+                { tier: "브론즈 III", min: 800, max: 999, icon: "2.png" },
+                { tier: "브론즈 II", min: 1000, max: 1199, icon: "2.png" },
+                { tier: "브론즈 I", min: 1200, max: 1399, icon: "2.png" },
+
+                { tier: "실버 IV", min: 1400, max: 1649, icon: "3.png" },
+                { tier: "실버 III", min: 1650, max: 1899, icon: "3.png" },
+                { tier: "실버 II", min: 1900, max: 2149, icon: "3.png" },
+                { tier: "실버 I", min: 2150, max: 2399, icon: "3.png" },
+
+                { tier: "골드 IV", min: 2400, max: 2699, icon: "4.png" },
+                { tier: "골드 III", min: 2700, max: 2999, icon: "4.png" },
+                { tier: "골드 II", min: 3000, max: 3299, icon: "4.png" },
+                { tier: "골드 I", min: 3300, max: 3599, icon: "4.png" },
+
+                { tier: "플래티넘 IV", min: 3600, max: 3949, icon: "5.png" },
+                { tier: "플래티넘 III", min: 3950, max: 4299, icon: "5.png" },
+                { tier: "플래티넘 II", min: 4300, max: 4649, icon: "5.png" },
+                { tier: "플래티넘 I", min: 4650, max: 4999, icon: "5.png" },
+
+                { tier: "다이아몬드 IV", min: 5000, max: 5349, icon: "6.png" },
+                { tier: "다이아몬드 III", min: 5350, max: 5699, icon: "6.png" },
+                { tier: "다이아몬드 II", min: 5700, max: 6049, icon: "6.png" },
+                { tier: "다이아몬드 I", min: 6050, max: 6399, icon: "6.png" },
+
+                { tier: "메테오라이트", min: 6400, max: 7099, icon: "63.png" },
+                { tier: "미스릴", min: 7100, max: 7799, icon: "66.png" },
+            ];
+
+            if (mmr >= 7800) {
+                if (rank && rank <= 300) {
+                    return { tier: "이터니티", detail: `이터니티 - ${mmr - 7800} RP`, icon: "8.png" };
+                }
+                if (rank && rank <= 1000) {
+                    return { tier: "데미갓", detail: `데미갓 - ${mmr - 7800} RP`, icon: "7.png" };
+                }
+                return { tier: "미스릴+", detail: `미스릴 - ${mmr - 7100} RP`, icon: "66.png" };
+            }
+
+            for (const div of divisions) {
+                if (mmr >= div.min && mmr <= div.max) {
+                    return {
+                        tier: div.tier,
+                        detail: `${div.tier} - ${mmr - div.min} RP`,
+                        icon: div.icon
+                    };
+                }
+            }
+
+            return { tier: "언랭크", detail: "", icon: "1.png" };
+        }
+
+        // 🔹 API 호출
         async function loadTop1000() {
             try {
                 const server = document.getElementById("serverSelect").value;
                 const mode = document.getElementById("modeSelect").value;
 
-                let url = `/api/top1000?mode=${mode}&server=${server}`;
+                const url = `/api/top1000?mode=${mode}&server=${server}`;
                 const res = await fetch(url);
                 const data = await res.json();
 
                 if (!Array.isArray(data)) {
-                    console.error("Unexpected data:", data);
                     document.getElementById("rankTable").innerHTML =
-                        `<tr><td colspan="5">데이터 없음</td></tr>`;
+                        `<tr><td colspan="6">⚠ 데이터 없음</td></tr>`;
                     return;
                 }
 
                 allPlayers = data;
                 currentPage = 1;
                 renderPage();
+
+                previousRanks = {};
+                data.forEach(p => {
+                    previousRanks[p.nickname] = p.rank;
+                });
+
+                document.getElementById("lastUpdate").innerText =
+                    "⏱ 마지막 갱신: " + new Date().toLocaleTimeString();
             } catch (err) {
                 console.error("데이터 갱신 실패:", err);
             }
@@ -47,67 +114,61 @@
                 const prevRank = previousRanks[player.nickname];
                 let changeSymbol = "–";
                 let changeColor = "gray";
-                let changeDiff = "";
+                let changeText = "";
 
                 if (prevRank !== undefined) {
-                    const diff = prevRank - player.rank;
-                    if (diff > 0) {
-                        changeSymbol = "⬆️";
-                        changeColor = "green";
-                        changeDiff = `(+${diff})`;
-                    } else if (diff < 0) {
-                        changeSymbol = "⬇️";
-                        changeColor = "red";
-                        changeDiff = `(${diff})`;
+                    const rankDiff = prevRank - player.rank;
+                    if (rankDiff > 0) {
+                        changeSymbol = "⬆️"; changeColor = "green"; changeText = `(+${rankDiff})`;
+                    } else if (rankDiff < 0) {
+                        changeSymbol = "⬇️"; changeColor = "red"; changeText = `(${rankDiff})`;
                     }
                 }
 
-                const row = `
+                const division = getDivisionByMMR(player.mmr, player.rank);
+
+                tbody.innerHTML += `
           <tr>
             <td>${player.rank}</td>
-            <td>${player.nickname}</td>
+            <td class="nickname">${player.nickname}</td>
+            <td><img src="/tiers/${division.icon}" width="40"></td>
+            <td>${division.tier}<br><small>${division.detail}</small></td>
             <td>${player.mmr}</td>
-            <td style="color:${changeColor}; font-weight:bold;">${changeSymbol} ${changeDiff}</td>
+            <td style="color:${changeColor}; font-weight:bold;">
+              ${changeSymbol} ${changeText}
+            </td>
           </tr>`;
-                tbody.innerHTML += row;
-
-                previousRanks[player.nickname] = player.rank;
             });
-
-            document.getElementById("lastUpdate").innerText =
-                "⏱ 마지막 갱신: " + new Date().toLocaleTimeString();
 
             updatePagination();
         }
 
-        // 🔹 페이지네이션 (현재 ±2 페이지만 표시)
+        // 🔹 페이지네이션 (현재 페이지 기준 이동)
         function updatePagination() {
             const totalPages = Math.ceil(allPlayers.length / 10);
             const pagination = document.getElementById("pagination");
             pagination.innerHTML = "";
 
-            // « 처음
-            const firstBtn = document.createElement("button");
-            firstBtn.textContent = "« 처음";
-            firstBtn.disabled = currentPage === 1;
-            firstBtn.onclick = () => { currentPage = 1; renderPage(); };
-            pagination.appendChild(firstBtn);
+            const first = document.createElement("button");
+            first.textContent = "« 처음";
+            first.disabled = currentPage === 1;
+            first.onclick = () => { currentPage = 1; renderPage(); };
+            pagination.appendChild(first);
 
-            // ‹ 이전
-            const prevBtn = document.createElement("button");
-            prevBtn.textContent = "‹ 이전";
-            prevBtn.disabled = currentPage === 1;
-            prevBtn.onclick = () => {
-                if (currentPage > 1) {
-                    currentPage--;
-                    renderPage();
-                }
-            };
-            pagination.appendChild(prevBtn);
+            const prev = document.createElement("button");
+            prev.textContent = "‹ 이전";
+            prev.disabled = currentPage === 1;
+            prev.onclick = () => { currentPage--; renderPage(); };
+            pagination.appendChild(prev);
 
-            // 번호 버튼 (현재 ±2 페이지만)
-            const startPage = Math.max(1, currentPage - 2);
-            const endPage = Math.min(totalPages, currentPage + 2);
+            // 현재 페이지 기준 페이지 범위
+            let startPage = Math.max(1, currentPage - 2);
+            let endPage = Math.min(totalPages, startPage + 4);
+
+            if (endPage - startPage < 4) {
+                startPage = Math.max(1, endPage - 4);
+            }
+
             for (let i = startPage; i <= endPage; i++) {
                 const btn = document.createElement("button");
                 btn.textContent = i;
@@ -116,41 +177,29 @@
                 pagination.appendChild(btn);
             }
 
-            // 다음 ›
-            const nextBtn = document.createElement("button");
-            nextBtn.textContent = "다음 ›";
-            nextBtn.disabled = currentPage === totalPages;
-            nextBtn.onclick = () => {
-                if (currentPage < totalPages) {
-                    currentPage++;
-                    renderPage();
-                }
-            };
-            pagination.appendChild(nextBtn);
+            const next = document.createElement("button");
+            next.textContent = "다음 ›";
+            next.disabled = currentPage === totalPages;
+            next.onclick = () => { currentPage++; renderPage(); };
+            pagination.appendChild(next);
 
-            // 끝 »
-            const lastBtn = document.createElement("button");
-            lastBtn.textContent = "끝 »";
-            lastBtn.disabled = currentPage === totalPages;
-            lastBtn.onclick = () => { currentPage = totalPages; renderPage(); };
-            pagination.appendChild(lastBtn);
+            const last = document.createElement("button");
+            last.textContent = "끝 »";
+            last.disabled = currentPage === totalPages;
+            last.onclick = () => { currentPage = totalPages; renderPage(); };
+            pagination.appendChild(last);
         }
 
-        // 🔹 자동 갱신
         function setRefreshInterval(minutes) {
             if (refreshTimer) clearInterval(refreshTimer);
             refreshTimer = setInterval(loadTop1000, minutes * 60 * 1000);
-            console.log(`자동 갱신 주기: ${minutes}분`);
         }
 
-        // 초기 실행
         window.onload = () => {
             loadTop1000();
             setRefreshInterval(5);
-
             document.getElementById("refreshSelect").addEventListener("change", (e) => {
-                const minutes = parseInt(e.target.value);
-                setRefreshInterval(minutes);
+                setRefreshInterval(parseInt(e.target.value));
             });
             document.getElementById("serverSelect").addEventListener("change", loadTop1000);
             document.getElementById("modeSelect").addEventListener("change", loadTop1000);
@@ -159,25 +208,31 @@
     <style>
         body { font-family: sans-serif; background: #f4f6f8; padding: 20px; }
         h1 { text-align: center; }
-        table { margin: auto; border-collapse: collapse; width: 80%; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1);}
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: center; }
+        table {
+            margin: auto;
+            border-collapse: collapse;
+            width: 90%;
+            background: white;
+            table-layout: fixed;
+        }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; word-wrap: break-word; }
         th { background: #007BFF; color: white; }
         tr:nth-child(even) { background: #f9f9f9; }
-        #lastUpdate, #controls, #pagination { text-align: center; margin-top: 15px; }
-        select, button { padding: 5px; margin: 3px; }
+        td.nickname { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #controls, #pagination, #lastUpdate { text-align: center; margin: 15px; }
+        button { margin: 0 5px; padding: 5px 12px; }
         button:disabled { background: #007BFF; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
-<h1>현재 시즌 Top 1000 Rankers</h1>
-
+<h1>현재 시즌 Top 1000 순위표</h1>
 <div id="controls">
     <label>서버:</label>
     <select id="serverSelect">
-        <option value="global" selected>Global (전체)</option>
-        <option value="10">Asia 1</option>
-        <option value="17">Asia 2</option>
-        <option value="18">Asia 3</option>
+        <option value="global">Global</option>
+        <option value="10">Asia</option>
+        <option value="17">Asia2</option>
+        <option value="18">Asia3</option>
         <option value="12">North America</option>
         <option value="13">Europe</option>
         <option value="14">South America</option>
@@ -202,9 +257,11 @@
 <table>
     <thead>
     <tr>
-        <th>Rank</th>
-        <th>Nickname</th>
-        <th>MMR</th>
+        <th>순위</th>
+        <th>닉네임</th>
+        <th>티어</th>
+        <th>티어 & RP</th>
+        <th>점수</th>
         <th>변동</th>
     </tr>
     </thead>
